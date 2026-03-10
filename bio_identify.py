@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-api_key = os.getenv("OPENAI_API_KEY")
+api_key = os.getenv("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")
 if not api_key:
     st.error("❌ OPENAI_API_KEY não encontrada. Configure a variável de ambiente.")
     st.stop()
