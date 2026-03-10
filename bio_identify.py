@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 import json
 import logging
 from typing import Dict, Optional
-from collections import Counter
 
 # =============================
 # LOGGING
@@ -47,39 +46,11 @@ st.markdown("""
 <style>
 .stApp {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-}
-
-.stMainBlockContainer {
-    background-color: rgba(255, 255, 255, 0.98);
-    color: #333;
 }
 
 h1, h2, h3 {
     color: #667eea;
     font-weight: bold;
-}
-
-.result-box {
-    background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
-    padding: 20px;
-    border-radius: 12px;
-    border-left: 5px solid #2e7d32;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-}
-
-.error-box {
-    background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
-    padding: 15px;
-    border-radius: 8px;
-    border-left: 4px solid #c62828;
-}
-
-.success-box {
-    background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
-    padding: 15px;
-    border-radius: 8px;
-    border-left: 4px solid #2e7d32;
 }
 
 .info-box {
@@ -89,23 +60,11 @@ h1, h2, h3 {
     border-left: 4px solid #1976d2;
 }
 
-.kingdom-badge {
-    display: inline-block;
-    background: #667eea;
-    color: white;
-    padding: 5px 12px;
-    border-radius: 20px;
-    margin: 5px 5px 5px 0;
-    font-size: 12px;
-    font-weight: bold;
-}
-
-.species-card {
-    background: white;
+.success-box {
+    background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
     padding: 15px;
-    border-radius: 10px;
-    border: 2px solid #667eea;
-    margin: 10px 0;
+    border-radius: 8px;
+    border-left: 4px solid #2e7d32;
 }
 
 .stats-metric {
@@ -116,7 +75,6 @@ h1, h2, h3 {
     border-radius: 10px;
     font-weight: bold;
 }
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -157,7 +115,6 @@ class DatabaseManager:
                 """)
                 conn.commit()
                 
-                # Migração se necessário
                 cursor.execute("PRAGMA table_info(identifications)")
                 columns = [col[1] for col in cursor.fetchall()]
                 
@@ -227,11 +184,9 @@ class DatabaseManager:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
-                # Total de identificações
                 cursor.execute("SELECT COUNT(*) FROM identifications")
                 total = cursor.fetchone()[0] or 0
                 
-                # Distribuição por reino
                 cursor.execute("""
                     SELECT kingdom, COUNT(*) 
                     FROM identifications 
@@ -239,7 +194,6 @@ class DatabaseManager:
                 """)
                 kingdoms = dict(cursor.fetchall())
                 
-                # Distribuição por classe
                 cursor.execute("""
                     SELECT class, COUNT(*) 
                     FROM identifications 
@@ -286,9 +240,7 @@ class SpeciesIdentifier:
             raise
     
     def identify_species(self, image: Image.Image) -> Optional[Dict]:
-        """
-        Identifica espécies em foto com retry automático
-        """
+        """Identifica espécies em foto com retry automático"""
         base64_image = self.encode_image(image)
         
         prompt = """
@@ -307,8 +259,6 @@ Forneça informações sobre:
 10. Habitat/Ambiente onde vive
 11. Alimentação/Dieta
 12. Status de conservação (se conhecido)
-
-Se não conseguir identificar com certeza, indique o máximo que puder.
 
 Responda APENAS com JSON válido, sem markdown:
 {
@@ -335,10 +285,7 @@ Responda APENAS com JSON válido, sem markdown:
                         {
                             "role": "user",
                             "content": [
-                                {
-                                    "type": "text",
-                                    "text": prompt
-                                },
+                                {"type": "text", "text": prompt},
                                 {
                                     "type": "image_url",
                                     "image_url": {
@@ -354,7 +301,6 @@ Responda APENAS com JSON válido, sem markdown:
                 
                 content = response.choices[0].message.content.strip()
                 
-                # Limpar possível markdown
                 if content.startswith("```json"):
                     content = content.replace("```json", "").replace("```", "")
                 elif content.startswith("```"):
@@ -362,27 +308,20 @@ Responda APENAS com JSON válido, sem markdown:
                 
                 data = json.loads(content)
                 
-                # Validar dados
                 if not self._validate_data(data):
-                    raise ValueError("Dados inválidos retornados pela IA")
+                    raise ValueError("Dados inválidos")
                 
-                logger.info(f"Species identification successful: {data['species_name']}")
+                logger.info(f"Species identification: {data['species_name']}")
                 return data
                 
             except RateLimitError:
                 if attempt < self.MAX_RETRIES - 1:
-                    st.warning(f"⏳ Rate limit atingido. Tentativa {attempt + 1}/{self.MAX_RETRIES}...")
+                    st.warning(f"⏳ Tentativa {attempt + 1}/{self.MAX_RETRIES}...")
                     continue
                 else:
-                    logger.error("Rate limit exceeded after retries")
                     raise
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON decode error (attempt {attempt + 1}): {e}")
-                if attempt == self.MAX_RETRIES - 1:
-                    raise
-                continue
-            except Exception as e:
-                logger.error(f"Identification error (attempt {attempt + 1}): {e}")
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.error(f"Error attempt {attempt + 1}: {e}")
                 if attempt == self.MAX_RETRIES - 1:
                     raise
                 continue
@@ -391,17 +330,9 @@ Responda APENAS com JSON válido, sem markdown:
     
     @staticmethod
     def _validate_data(data: Dict) -> bool:
-        """Valida dados retornados pela IA"""
-        required_fields = ["species_name", "common_name", "kingdom"]
-        
-        if not all(field in data for field in required_fields):
-            return False
-        
-        # Verificar se campos obrigatórios têm conteúdo
-        if not data["species_name"] or not data["common_name"]:
-            return False
-        
-        return True
+        """Valida dados"""
+        required = ["species_name", "common_name", "kingdom"]
+        return all(field in data and data[field] for field in required)
 
 
 # =============================
@@ -409,10 +340,10 @@ Responda APENAS com JSON válido, sem markdown:
 # =============================
 
 def validate_image(image: Image.Image) -> bool:
-    """Valida imagem antes de processar"""
+    """Valida imagem"""
     try:
         if image.size[0] < 100 or image.size[1] < 100:
-            st.error("❌ Imagem muito pequena. Use uma imagem maior que 100x100px")
+            st.error("❌ Imagem muito pequena (mín: 100x100px)")
             return False
         
         buffer = io.BytesIO()
@@ -420,47 +351,45 @@ def validate_image(image: Image.Image) -> bool:
         size_mb = len(buffer.getvalue()) / (1024 * 1024)
         
         if size_mb > 10:
-            st.error("❌ Imagem muito grande. Use uma imagem menor que 10MB")
+            st.error("❌ Imagem muito grande (máx: 10MB)")
             return False
         
         return True
     except Exception as e:
-        st.error(f"❌ Erro ao validar imagem: {e}")
-        logger.error(f"Image validation error: {e}")
+        st.error(f"❌ Erro ao validar: {str(e)[:50]}")
         return False
 
 
 # =============================
-# VISUALIZAÇÕES
+# VISUALIZAÇÕES (CORRIGIDAS)
 # =============================
 
-def plot_kingdom_distribution(stats: Dict) -> plt.Figure:
-    """Cria gráfico de distribuição por reino"""
+@st.cache_resource
+def get_figure_kingdom(stats: Dict):
+    """Cria gráfico de reino com cache"""
     if not stats.get("kingdoms"):
         return None
     
-    kingdoms = stats["kingdoms"]
-    
     fig, ax = plt.subplots(figsize=(10, 6))
-    colors = ["#667eea", "#764ba2", "#f093fb", "#4facfe", "#00f2fe"]
+    kingdoms = stats["kingdoms"]
+    colors = ["#667eea", "#764ba2", "#f093fb", "#4facfe"]
     ax.barh(list(kingdoms.keys()), list(kingdoms.values()), color=colors[:len(kingdoms)])
     ax.set_xlabel("Quantidade")
-    ax.set_title("Distribuição de Identificações por Reino", fontweight="bold", fontsize=14)
+    ax.set_title("Distribuição por Reino", fontweight="bold")
     ax.grid(axis="x", alpha=0.3)
-    
     plt.tight_layout()
     return fig
 
 
-def plot_class_distribution(stats: Dict) -> plt.Figure:
-    """Cria gráfico de distribuição por classe"""
+@st.cache_resource
+def get_figure_class(stats: Dict):
+    """Cria gráfico de classe com cache"""
     if not stats.get("classes"):
         return None
     
-    classes = stats["classes"]
-    
     fig, ax = plt.subplots(figsize=(10, 6))
-    colors = ["#667eea", "#764ba2", "#f093fb", "#4facfe", "#00f2fe"]
+    classes = stats["classes"]
+    colors = ["#667eea", "#764ba2", "#f093fb", "#4facfe"]
     ax.pie(
         classes.values(),
         labels=classes.keys(),
@@ -468,8 +397,7 @@ def plot_class_distribution(stats: Dict) -> plt.Figure:
         colors=colors[:len(classes)],
         startangle=90
     )
-    ax.set_title("Top 5 Classes Identificadas", fontweight="bold", fontsize=14)
-    
+    ax.set_title("Top 5 Classes", fontweight="bold")
     plt.tight_layout()
     return fig
 
@@ -486,22 +414,19 @@ def main():
     if "identifier" not in st.session_state:
         st.session_state.identifier = SpeciesIdentifier(client)
     
+    if "show_success" not in st.session_state:
+        st.session_state.show_success = False
+    
     db = st.session_state.db
     identifier = st.session_state.identifier
     
     # Header
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        st.markdown("### 🔬")
-    with col2:
-        st.title("Bio Identify - Seu Biólogo de Bolso")
+    st.title("🔬 Bio Identify - Seu Biólogo de Bolso")
     
     st.markdown("""
     <div class='info-box'>
     🌍 <b>Bio Identify</b> é seu assistente de identificação biológica inteligente. 
-    Envie uma foto de qualquer ser vivo (animal, planta, fungo, etc) e obtenha 
-    informações científicas completas sobre a espécie. Mantemos um histórico de 
-    todas as suas descobertas!
+    Envie uma foto de qualquer ser vivo e obtenha informações científicas completas!
     </div>
     """, unsafe_allow_html=True)
     
@@ -518,7 +443,7 @@ def main():
         col1, col2 = st.columns([1, 1])
         
         with col1:
-            st.write("Tire ou envie uma foto clara de um ser vivo")
+            st.write("**Tire ou envie uma foto clara de um ser vivo**")
             file = st.file_uploader(
                 "Escolha uma imagem",
                 type=["jpg", "png", "jpeg"],
@@ -532,56 +457,55 @@ def main():
                     if image.mode != "RGB":
                         image = image.convert("RGB")
                     
-                    st.image(image, caption="Foto enviada", use_column_width=True)
+                    st.image(image, caption="Foto enviada", width=300)
                     
                     if not validate_image(image):
                         st.stop()
                     
-                    if st.button("🔍 Identificar Espécie", key="identify_btn", use_container_width=True):
+                    if st.button("🔍 Identificar Espécie", key="identify_btn"):
                         with st.spinner("⏳ IA analisando imagem..."):
                             try:
                                 result = identifier.identify_species(image)
                                 
-                                if result:
-                                    if db.save_identification(result):
-                                        st.markdown("""
-                                        <div class='success-box'>
-                                        ✅ <b>Identificação concluída com sucesso!</b>
-                                        </div>
-                                        """, unsafe_allow_html=True)
-                                        
-                                        st.rerun()
-                                    else:
-                                        st.error("❌ Erro ao salvar identificação.")
+                                if result and db.save_identification(result):
+                                    st.session_state.show_success = True
+                                    st.session_state.last_result = result
                                 else:
-                                    st.error("❌ Não foi possível identificar. Tente outra foto.")
+                                    st.error("❌ Erro na identificação. Tente novamente.")
                             
                             except RateLimitError:
-                                st.warning("⚠️ Limite de requisições atingido. Aguarde alguns momentos.")
-                            except json.JSONDecodeError:
-                                st.error("❌ Erro ao processar resposta da IA.")
+                                st.warning("⚠️ Limite atingido. Aguarde...")
                             except Exception as e:
-                                st.error(f"❌ Erro: {str(e)[:100]}")
-                                logger.error(f"Error: {e}", exc_info=True)
+                                st.error(f"❌ Erro: {str(e)[:80]}")
                 
                 except Exception as e:
-                    st.error(f"❌ Erro ao abrir imagem: {str(e)}")
+                    st.error(f"❌ Erro ao abrir: {str(e)[:50]}")
         
-        # Mostrar última identificação na coluna 2
+        # Última identificação
         with col2:
-            df = db.get_history()
-            if len(df) > 0:
-                latest = df.iloc[0]
-                st.markdown("### 🏆 Última Identificação")
+            if st.session_state.show_success and "last_result" in st.session_state:
+                st.markdown("""
+                <div class='success-box'>
+                ✅ <b>Identificação concluída!</b>
+                </div>
+                """, unsafe_allow_html=True)
                 
-                with st.container(border=True):
-                    st.markdown(f"### {latest['common_name']}")
-                    st.markdown(f"**Nome Científico:** *{latest['species_name']}*")
-                    st.markdown(f"**Reino:** {latest['kingdom']}")
-                    st.markdown(f"**Classe:** {latest['class']}")
-                    st.markdown(f"**Data:** {pd.to_datetime(latest['created_at']).strftime('%d/%m/%Y %H:%M')}")
+                result = st.session_state.last_result
+                st.markdown(f"### {result.get('common_name', 'N/A')}")
+                st.markdown(f"**Científico:** *{result.get('species_name', 'N/A')}*")
+                st.markdown(f"**Reino:** {result.get('kingdom', 'N/A')}")
+                st.markdown(f"**Classe:** {result.get('class', 'N/A')}")
+                st.markdown(f"**Descrição:** {result.get('description', 'N/A')[:150]}...")
             else:
-                st.info("ℹ️ Nenhuma identificação ainda. Comece enviando uma foto!")
+                df = db.get_history()
+                if len(df) > 0:
+                    latest = df.iloc[0]
+                    st.markdown("### 🏆 Última Identificação")
+                    st.markdown(f"**{latest['common_name']}**")
+                    st.markdown(f"*{latest['species_name']}*")
+                    st.markdown(f"**Reino:** {latest['kingdom']}")
+                else:
+                    st.info("ℹ️ Nenhuma identificação ainda")
     
     # =============================
     # TAB 2: HISTÓRICO
@@ -593,28 +517,22 @@ def main():
         df = db.get_history()
         
         if len(df) > 0:
-            # Filtros
             col1, col2, col3 = st.columns(3)
             
             with col1:
                 filter_kingdom = st.multiselect(
                     "Filtrar por Reino",
-                    options=df["kingdom"].unique(),
-                    default=None
+                    options=sorted(df["kingdom"].unique())
                 )
             
             with col2:
                 filter_class = st.multiselect(
                     "Filtrar por Classe",
-                    options=df["class"].dropna().unique(),
-                    default=None
+                    options=sorted(df["class"].dropna().unique())
                 )
             
             with col3:
-                sort_by = st.selectbox(
-                    "Ordenar por",
-                    ["Mais Recentes", "Mais Antigas", "A-Z"]
-                )
+                sort_by = st.radio("Ordenar", ["Recentes", "Antigas", "A-Z"])
             
             # Aplicar filtros
             filtered_df = df.copy()
@@ -625,108 +543,72 @@ def main():
             if filter_class:
                 filtered_df = filtered_df[filtered_df["class"].isin(filter_class)]
             
-            # Aplicar ordenação
-            if sort_by == "Mais Antigas":
+            if sort_by == "Antigas":
                 filtered_df = filtered_df.iloc[::-1]
             elif sort_by == "A-Z":
                 filtered_df = filtered_df.sort_values("common_name")
             
-            # Exibir dados
             if len(filtered_df) > 0:
-                # Formatar para exibição
                 display_df = filtered_df.copy()
                 display_df["created_at"] = pd.to_datetime(display_df["created_at"]).dt.strftime("%d/%m/%Y %H:%M")
                 
-                display_df = display_df.rename(columns={
-                    "id": "ID",
-                    "species_name": "Nome Científico",
-                    "common_name": "Nome Comum",
-                    "kingdom": "Reino",
-                    "class": "Classe",
-                    "created_at": "Data"
-                })
-                
                 st.dataframe(
-                    display_df[["ID", "Nome Comum", "Nome Científico", "Reino", "Classe", "Data"]],
+                    display_df[["id", "common_name", "species_name", "kingdom", "class", "created_at"]],
                     use_container_width=True,
-                    height=400
+                    height=400,
+                    hide_index=True
                 )
             else:
-                st.info("ℹ️ Nenhuma identificação encontrada com os filtros selecionados.")
+                st.info("ℹ️ Sem resultados com os filtros")
         else:
-            st.info("ℹ️ Nenhuma identificação ainda. Vá para 'Identificar' e envie uma foto!")
+            st.info("ℹ️ Nenhuma identificação. Comece na aba 'Identificar'")
     
     # =============================
     # TAB 3: ESTATÍSTICAS
     # =============================
     
     with tab3:
-        st.subheader("📊 Estatísticas e Análises")
+        st.subheader("📊 Estatísticas")
         
         stats = db.get_statistics()
         
         if stats.get("total", 0) > 0:
-            # Métricas principais
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                st.markdown(f"""
-                <div class='stats-metric'>
-                📊 Total de Identificações<br>
-                <h2>{stats['total']}</h2>
-                </div>
-                """, unsafe_allow_html=True)
+                st.metric("📊 Total", stats['total'])
             
             with col2:
-                num_kingdoms = len(stats.get("kingdoms", {}))
-                st.markdown(f"""
-                <div class='stats-metric'>
-                🌍 Reinos Identificados<br>
-                <h2>{num_kingdoms}</h2>
-                </div>
-                """, unsafe_allow_html=True)
+                st.metric("🌍 Reinos", len(stats.get("kingdoms", {})))
             
             with col3:
-                num_classes = len(stats.get("classes", {}))
-                st.markdown(f"""
-                <div class='stats-metric'>
-                🏆 Top Classes<br>
-                <h2>{num_classes}</h2>
-                </div>
-                """, unsafe_allow_html=True)
+                st.metric("🏆 Classes", len(stats.get("classes", {})))
             
             st.divider()
             
-            # Gráficos
             col1, col2 = st.columns([1, 1])
             
             with col1:
-                st.write("### 📊 Distribuição por Reino")
-                fig1 = plot_kingdom_distribution(stats)
+                st.write("### Distribuição por Reino")
+                fig1 = get_figure_kingdom(stats)
                 if fig1:
                     st.pyplot(fig1, use_container_width=True)
             
             with col2:
-                st.write("### 🥧 Top 5 Classes")
-                fig2 = plot_class_distribution(stats)
+                st.write("### Top 5 Classes")
+                fig2 = get_figure_class(stats)
                 if fig2:
                     st.pyplot(fig2, use_container_width=True)
             
             st.divider()
-            
-            # Detalhes
-            st.write("### 📈 Detalhes por Reino")
+            st.write("### Resumo por Reino")
             
             for kingdom, count in sorted(stats.get("kingdoms", {}).items(), key=lambda x: x[1], reverse=True):
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.write(f"**{kingdom}**")
-                with col2:
-                    st.write(f"**{count}** espécie(s)")
-                st.progress(count / stats['total'])
+                st.write(f"**{kingdom}:** {count} espécie(s)")
+                st.progress(min(count / stats['total'], 1.0))
         
         else:
-            st.info("ℹ️ Sem dados para análise. Identifique espécies primeiro!")
+            st.info("ℹ️ Sem dados. Identifique espécies primeiro!")
 
 
 if __name__ == "__main__":
