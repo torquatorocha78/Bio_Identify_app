@@ -89,6 +89,7 @@ def get_history():
 init_db()
 
 st.title("🔬 Identificação Biológica")
+st.write("Seu Biólogo digital")
 st.write("Identifique seres vivos com IA")
 
 # =============================
