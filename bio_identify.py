@@ -12,17 +12,15 @@ from dotenv import load_dotenv
 # =============================
 # CONFIG
 # =============================
-
 load_dotenv()
 
+# Validar API Key
 api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
-    st.error("OPENAI_API_KEY não configurada!")
+    st.error("❌ OPENAI_API_KEY não encontrada. Configure a variável de ambiente.")
     st.stop()
 
 client = OpenAI(api_key=api_key)
-
-st.set_page_config(page_title="Bio Identify", page_icon="🔬", layout="wide")
 
 # =============================
 # DATABASE
